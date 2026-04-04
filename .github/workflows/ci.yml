@@ -1,0 +1,97 @@
+name: CI - Water Quality Model Training
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'MLProject/**'
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run actions/checkout@v3
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.12.7
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12.7'
+
+      - name: Check Env
+        run: |
+          python --version
+          pip --version
+          echo "Working directory: $(pwd)"
+          ls -la MLProject/
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install mlflow==2.19.0 \
+                      pandas \
+                      numpy \
+                      scikit-learn==1.6.0 \
+                      matplotlib \
+                      seaborn
+
+      - name: Run mlflow project
+        run: |
+          cd MLProject
+          mlflow run . --env-manager=local \
+            -P train_path=water_potability_preprocessing/water_potability_train.csv \
+            -P test_path=water_potability_preprocessing/water_potability_test.csv
+
+      - name: Get latest MLflow run_id
+        id: get_run_id
+        run: |
+          cd MLProject
+          RUN_ID=$(python -c "
+          import mlflow
+          client = mlflow.MlflowClient()
+          exp = client.get_experiment_by_name('Water Quality Potability - CI')
+          if exp:
+              runs = client.search_runs(
+                  experiment_ids=[exp.experiment_id],
+                  order_by=['start_time DESC'],
+                  max_results=1
+              )
+              if runs:
+                  print(runs[0].info.run_id)
+          " 2>/dev/null || echo "unknown")
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Latest MLflow Run ID: $RUN_ID"
+
+      - name: Install Python dependencies
+        run: pip install mlflow==2.19.0
+
+      - name: Upload to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-artifacts-run${{ github.run_number }}
+          path: |
+            MLProject/mlruns/
+            MLProject/training_confusion_matrix.png
+          retention-days: 30
+
+      - name: Commit artifacts to repository
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Tambahkan mlruns ke .gitignore jika belum ada, atau commit
+          if [ -d "MLProject/mlruns" ]; then
+            git add MLProject/mlruns/ || true
+          fi
+          if [ -f "MLProject/training_confusion_matrix.png" ]; then
+            git add MLProject/training_confusion_matrix.png || true
+          fi
+
+          git diff --staged --quiet || \
+            git commit -m "ci: save mlflow artifacts - run #${{ github.run_number }} [skip ci]"
+          git push || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,15 @@
+name: water-quality-potability
+
+conda_env: conda.yaml
+
+entry_points:
+  main:
+    parameters:
+      train_path:
+        type: str
+        default: "water_potability_preprocessing/water_potability_train.csv"
+      test_path:
+        type: str
+        default: "water_potability_preprocessing/water_potability_test.csv"
+    command: >
+      python modelling.py
